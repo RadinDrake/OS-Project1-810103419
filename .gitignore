@@ -1,0 +1,4 @@
+test_runner
+*.o
+tmp/
+audit_*.txt
