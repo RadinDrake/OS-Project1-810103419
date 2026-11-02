@@ -12,24 +12,29 @@ MonolithicKernel::MonolithicKernel(VirtualDisk& disk, IVirtualConsoleDevice& con
 }
 
 int MonolithicKernel::syscall(int syscall_num, const SyscallArgs& args) {
-    // TODO
     // Trace entry into the kernel and record call depth.
-    // TODO
-    // Dispatch the syscall and handle invalid numbers.
-    // TODO
-    // Trace the return to user space and return the result.
+    tracer_.record_domain_switch("UserSpace", "MonolithicKernel", "syscall " + std::to_string(syscall_num));
+    tracer_.record_call_depth(3); // declared (illustrative) depth, not a measured stack
 
-    // YOUR CODE HERE
-    (void)syscall_num;
-    (void)args;
-    return ErrorCode::InvalidArgument;
+    // Dispatch the syscall and handle invalid numbers.
+    int result = ErrorCode::InvalidArgument;
+    auto it = syscall_table_.find(syscall_num);
+    if (it != syscall_table_.end()) {
+        result = it->second(*this, args);
+    }
+
+    // Trace the return to user space and return the result.
+    tracer_.record_domain_switch("MonolithicKernel", "UserSpace", "syscall_return");
+    return result;
 }
 
 void MonolithicKernel::setup_syscall_table() {
-    // TODO
     // Register each syscall number with its matching kernel handler.
-
-    // YOUR CODE HERE
+    syscall_table_[SYS_OPEN]          = &MonolithicKernel::handle_open;
+    syscall_table_[SYS_READ]          = &MonolithicKernel::handle_read;
+    syscall_table_[SYS_WRITE]         = &MonolithicKernel::handle_write;
+    syscall_table_[SYS_CLOSE]         = &MonolithicKernel::handle_close;
+    syscall_table_[SYS_CONSOLE_WRITE] = &MonolithicKernel::handle_console_write;
 }
 
 int MonolithicKernel::handle_open(MonolithicKernel& kernel, const SyscallArgs& args) {
@@ -53,44 +58,102 @@ int MonolithicKernel::handle_console_write(MonolithicKernel& kernel, const Sysca
 }
 
 int MonolithicKernel::sys_open(const std::string& path, OpenMode mode) {
-    // TODO
     // Validate the path, apply the open mode, and allocate a file descriptor.
+    if (path.empty()) {
+        return ErrorCode::InvalidArgument;
+    }
 
-    // YOUR CODE HERE
-    (void)path;
-    (void)mode;
-    return ErrorCode::NotFound;
+    switch (mode) {
+        case OpenMode::Read:
+            if (!file_engine_.file_exists(path)) {
+                return ErrorCode::NotFound;
+            }
+            break;
+        case OpenMode::Write:
+            // Truncate if it exists, create if it does not.
+            if (file_engine_.file_exists(path)) {
+                file_engine_.truncate_file(path);
+            } else if (!file_engine_.create_file(path)) {
+                return ErrorCode::NoSpace;
+            }
+            break;
+        default:
+            // Append / ReadWrite are not supported in this exercise.
+            return ErrorCode::InvalidArgument;
+    }
+
+    int fd = allocate_fd();
+    KernelFileDesc& desc = fd_table_[fd];
+    desc.path = path;
+    desc.mode = mode;
+    desc.offset = 0;
+    desc.is_open = true;
+    return fd;
 }
 
 int MonolithicKernel::sys_read(int handle, uint8_t* out_buf, size_t max_bytes) {
-    // TODO
     // Validate read access, read data, and update the offset and copy trace.
+    if (!is_valid_fd(handle)) {
+        return ErrorCode::InvalidHandle;
+    }
+    KernelFileDesc& desc = fd_table_[handle];
+    if (desc.mode != OpenMode::Read) {
+        return ErrorCode::PermissionDenied;
+    }
+    if (max_bytes == 0) {
+        return 0;
+    }
+    if (out_buf == nullptr) {
+        return ErrorCode::InvalidArgument;
+    }
 
-    // YOUR CODE HERE
-    (void)handle;
-    (void)out_buf;
-    (void)max_bytes;
-    return ErrorCode::InvalidHandle;
+    int n = file_engine_.read_bytes(desc.path, desc.offset, out_buf, max_bytes);
+    if (n < 0) {
+        return n;
+    }
+    desc.offset += static_cast<size_t>(n);
+    // Modeled copy from kernel space to the user buffer.
+    tracer_.record_data_copy(static_cast<size_t>(n), "KernelBuffer", "UserBuffer");
+    return n;
 }
 
 int MonolithicKernel::sys_write(int handle, const uint8_t* in_data, size_t count) {
-    // TODO
     // Validate write access, write data, and update the offset and copy trace.
+    if (!is_valid_fd(handle)) {
+        return ErrorCode::InvalidHandle;
+    }
+    KernelFileDesc& desc = fd_table_[handle];
+    if (desc.mode != OpenMode::Write) {
+        return ErrorCode::PermissionDenied;
+    }
+    if (count == 0) {
+        return 0;
+    }
+    if (in_data == nullptr) {
+        return ErrorCode::InvalidArgument;
+    }
 
-    // YOUR CODE HERE
-    (void)handle;
-    (void)in_data;
-    (void)count;
-    return ErrorCode::InvalidHandle;
+    // Modeled copy from the user buffer into kernel space.
+    int n = file_engine_.write_bytes(desc.path, desc.offset, in_data, count);
+    if (n < 0) {
+        return n;
+    }
+    desc.offset += static_cast<size_t>(n);
+    tracer_.record_data_copy(static_cast<size_t>(n), "UserBuffer", "KernelBuffer");
+    return n;
 }
 
 int MonolithicKernel::sys_close(int handle) {
-    // TODO
     // Validate and close the file descriptor.
-
-    // YOUR CODE HERE
-    (void)handle;
-    return ErrorCode::InvalidHandle;
+    if (!is_valid_fd(handle)) {
+        return ErrorCode::InvalidHandle;
+    }
+    KernelFileDesc& desc = fd_table_[handle];
+    desc.is_open = false;
+    desc.path.clear();
+    desc.offset = 0;
+    desc.mode = OpenMode::Read;
+    return ErrorCode::Success;
 }
 
 int MonolithicKernel::sys_console_write(const std::string& text) {

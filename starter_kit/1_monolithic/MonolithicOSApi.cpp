@@ -6,51 +6,48 @@ namespace monolithic {
 MonolithicOSApi::MonolithicOSApi(MonolithicKernel& kernel) : kernel_(kernel) {}
 
 int MonolithicOSApi::open(const std::string& path, OpenMode mode) {
-    // TODO
     // Forward the open request through the syscall dispatcher.
-
-    // YOUR CODE HERE
-    (void)path;
-    (void)mode;
-    return ErrorCode::NotFound;
+    SyscallArgs args;
+    args.path = path;
+    args.mode = mode;
+    return kernel_.syscall(SYS_OPEN, args);
 }
 
 int MonolithicOSApi::read(int handle, std::vector<uint8_t>& out_buffer, size_t max_bytes) {
-    // TODO
     // Forward the read request and resize the output buffer to the result.
+    out_buffer.assign(max_bytes, 0);
 
-    // YOUR CODE HERE
-    (void)handle;
-    (void)out_buffer;
-    (void)max_bytes;
-    return ErrorCode::InvalidHandle;
+    SyscallArgs args;
+    args.handle = handle;
+    args.buffer = out_buffer.data();
+    args.count = max_bytes;
+
+    int result = kernel_.syscall(SYS_READ, args);
+    out_buffer.resize(result > 0 ? static_cast<size_t>(result) : 0);
+    return result;
 }
 
 int MonolithicOSApi::write(int handle, const std::vector<uint8_t>& data) {
-    // TODO
     // Forward the write request through the syscall dispatcher.
-
-    // YOUR CODE HERE
-    (void)handle;
-    (void)data;
-    return ErrorCode::InvalidHandle;
+    SyscallArgs args;
+    args.handle = handle;
+    args.write_buffer = data.data();
+    args.count = data.size();
+    return kernel_.syscall(SYS_WRITE, args);
 }
 
 int MonolithicOSApi::close(int handle) {
-    // TODO
     // Forward the close request through the syscall dispatcher.
-
-    // YOUR CODE HERE
-    (void)handle;
-    return ErrorCode::InvalidHandle;
+    SyscallArgs args;
+    args.handle = handle;
+    return kernel_.syscall(SYS_CLOSE, args);
 }
 
 void MonolithicOSApi::console_write(const std::string& text) {
-    // TODO
     // Forward console output through the syscall dispatcher.
-
-    // YOUR CODE HERE
-    (void)text;
+    SyscallArgs args;
+    args.text = text;
+    kernel_.syscall(SYS_CONSOLE_WRITE, args);
 }
 
 std::string MonolithicOSApi::get_architecture_name() const {
