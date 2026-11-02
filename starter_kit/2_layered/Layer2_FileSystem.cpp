@@ -18,11 +18,27 @@ Layer2_FileSystem::Layer2_FileSystem(Layer1_Drivers& drivers, Tracer& tracer)
 
 void Layer2_FileSystem::process_request(ParameterBlock& pb) {
     tracer_.record_domain_switch("UserSpace", "LayeredKernel", "request");
-    // TODO
     // Dispatch the requested operation and store its result in pb.status.
-
-    // YOUR CODE HERE
-    pb.status = ErrorCode::InvalidArgument;
+    switch (pb.op) {
+        case LayerOp::Open:
+            pb.status = handle_open(pb.path, pb.mode);
+            break;
+        case LayerOp::Read:
+            pb.status = handle_read(pb.handle, pb.buffer, pb.length);
+            break;
+        case LayerOp::Write:
+            pb.status = handle_write(pb.handle, pb.write_buffer, pb.length);
+            break;
+        case LayerOp::Close:
+            pb.status = handle_close(pb.handle);
+            break;
+        case LayerOp::ConsoleWrite:
+            pb.status = handle_console_write(pb.text);
+            break;
+        default:
+            pb.status = ErrorCode::InvalidArgument;
+            break;
+    }
     tracer_.record_domain_switch("LayeredKernel", "UserSpace", "request_return");
 }
 
